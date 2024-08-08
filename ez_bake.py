@@ -52,6 +52,9 @@ class EzBake(bpy.types.Operator):
             if len([x for x in mat.node_tree.nodes if x.bl_idname == "ShaderNodeBsdfPrincipled"]) != 1:
                 self.report({"ERROR"},f'{len([x for x in mat.node_tree.nodes if x.bl_idname == "ShaderNodeBsdfPrincipled"])} BSDFs found in material {mat.name}')
                 return {'CANCELLED'}
+
+        render_engine = bpy.data.scenes["Scene"].render.engine
+        bpy.data.scenes["Scene"].render.engine = 'CYCLES'
         if context.object.ez_bake_color:
             setup_color(context)
             bake_boilerplate(context, "Color", "DIFFUSE", (-1000, 0), False)
@@ -67,9 +70,11 @@ class EzBake(bpy.types.Operator):
         if context.object.ez_bake_normal:
             bake_boilerplate(context, "Normal", "NORMAL", (-1000, -1200), True)
         if context.object.ez_bake_alpha:
+            setup_alpha(context)
             bake_boilerplate(context, "Alpha", "EMIT", (-1000, -1500), True)
+            unsetup_alpha(context)
 
-
+        bpy.data.scenes["Scene"].render.engine = render_engine
 
         return {'FINISHED'}
     
@@ -150,6 +155,40 @@ def unsetup_metallic(context):
             mat.node_tree.links.remove(metallic_link)
             mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
 
+def setup_alpha(context):
+    for material_slot in context.object.material_slots:
+        mat = material_slot.material
+        output = next(x for x in mat.node_tree.nodes if x.bl_idname == "ShaderNodeOutputMaterial")
+        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname == "ShaderNodeBsdfPrincipled")
+        alpha_link = [x for x in mat.node_tree.links if x.to_node == bsdf and x.to_socket.identifier == 'Alpha']
+        if len(alpha_link) == 0:
+            # copy bare alpha value to new node
+            node = mat.node_tree.nodes.new("ShaderNodeValue")
+            node.location = bsdf.location - mathutils.Vector((170, 45))
+            node.name = "EZBake_AlphaTemp"
+            node.outputs[0].default_value = bsdf.inputs['Alpha'].default_value
+            mat.node_tree.links.new(node.outputs[0], output.inputs[0])
+        else:
+            # make temp reroute node
+            alpha_link = alpha_link[0]
+            mat.node_tree.links.new(alpha_link.from_socket, output.inputs[0])
+            
+def unsetup_alpha(context):
+    for material_slot in context.object.material_slots:
+        mat = material_slot.material
+        output = next(x for x in mat.node_tree.nodes if x.bl_idname == "ShaderNodeOutputMaterial")
+        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname == "ShaderNodeBsdfPrincipled")
+        alpha_temp = [x for x in mat.node_tree.nodes if x.name == 'EZBake_AlphaTemp']
+        if len(alpha_temp) == 1:
+            alpha_temp = alpha_temp[0]
+            # copy value back to bsdf
+            mat.node_tree.nodes.remove(alpha_temp)
+            mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
+        else:
+            # plug reroute back in
+            alpha_link = next(x for x in mat.node_tree.links if x.to_socket == output.inputs[0])
+            mat.node_tree.links.remove(alpha_link)
+            mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
 
 
 
