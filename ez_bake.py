@@ -21,6 +21,8 @@ class EzBakePanel(bpy.types.Panel):
 
 
     def draw(self, context):
+        if context.active_object is None:
+            return
         layout = self.layout
         layout.prop(context.object, "ez_bake_resolution")
         layout.prop(context.object, "ez_bake_save_to_file")
@@ -39,6 +41,8 @@ class EzBakePanel(bpy.types.Panel):
         panel.prop(context.object, "ez_bake_emission")
         panel.prop(context.object, "ez_bake_normal")
         panel.prop(context.object, "ez_bake_alpha")
+
+        layout.prop(context.scene, "ez_bake_auto_refresh")
 
 
 class EzBake(bpy.types.Operator):
@@ -76,7 +80,16 @@ class EzBake(bpy.types.Operator):
 
         bpy.data.scenes["Scene"].render.engine = render_engine
 
+        if context.scene.ez_bake_auto_refresh:
+            refresh_textures(context)
+
         return {'FINISHED'}
+
+def refresh_textures(context):
+    for img in bpy.data.images:
+        if context.object.name in img.filepath:
+            img.reload()
+
     
 def setup_color(context):
     for material_slot in context.object.material_slots:
@@ -265,6 +278,7 @@ def register():
     bpy.types.Object.ez_bake_emission = bpy.props.BoolProperty(name = "Emission", default = True)
     bpy.types.Object.ez_bake_normal = bpy.props.BoolProperty(name = "Normal", default = True)
     bpy.types.Object.ez_bake_alpha = bpy.props.BoolProperty(name = "Alpha", default = True)
+    bpy.types.Scene.ez_bake_auto_refresh = bpy.props.BoolProperty(name = "Auto refresh textures", default = True)
 def unregister():
     bpy.utils.unregister_class(EzBakePanel)
     bpy.utils.unregister_class(EzBake)
