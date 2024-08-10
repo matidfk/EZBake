@@ -1,6 +1,6 @@
 bl_info = {
     "name": "EZ Bake",
-    "description": "Automate and streamline the baking process"
+    "description": "Automate and streamline the baking process",
     "version": (0, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > EZ Bake",
@@ -16,13 +16,12 @@ import mathutils
 class EzBakePreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
 
-    
-    texture_directory: StringProperty(
+    texture_directory: bpy.props.StringProperty(
         name="Baked texture directory (relative)",
         subtype='DIR_PATH',
         default="Textures",
     )
-    pack_textures: BoolProperty(
+    pack_textures: bpy.props.BoolProperty(
             name="Pack Textures",
             default=False
     )
