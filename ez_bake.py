@@ -1,6 +1,8 @@
 bl_info = {
     "name": "EZ Bake",
-    "blender": (4, 1, 1),
+    "description": "Automate and streamline the baking process"
+    "version": (0, 1),
+    "blender": (4, 2, 0),
     "location": "View3D > Sidebar > EZ Bake",
     "category": "Object",
 }
@@ -9,6 +11,27 @@ import bpy
 import mathutils
 
 # add enum for jpg or png, add option for directory instead of fixed, try add auto setup of new mat
+
+
+class EzBakePreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    
+    texture_directory: StringProperty(
+        name="Baked texture directory (relative)",
+        subtype='DIR_PATH',
+        default="Textures",
+    )
+    pack_textures: BoolProperty(
+            name="Pack Textures",
+            default=False
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        dir = layout.prop(self, "texture_directory")
+        dir.active = self.pack_textures 
+        layout.prop(self, "pack_textures")
 
 class EzBakePanel(bpy.types.Panel):
     bl_idname = "OBJECT_PT_ez_bake"
