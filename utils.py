@@ -11,8 +11,6 @@ class OBJECT_OT_ez_bake_contrib_setup(bpy.types.Operator):
     a high fixed cost for each object"""
 
     def execute(self, context):
-        context.scene.render.bake.use_selected_to_active = True
-        context.scene.render.bake.use_clear = False
 
         original_object = context.object
         bpy.ops.object.select_all(action='DESELECT')
@@ -23,9 +21,10 @@ class OBJECT_OT_ez_bake_contrib_setup(bpy.types.Operator):
             context.view_layer.objects.active = obj.object
         bpy.ops.object.duplicate()
         bpy.ops.object.join()
-        context.object.name = "EZBake_temp"
+        context.object.name = "EZBake_contributing_temp"
 
-        # Select original object as active
+        bpy.ops.object.select_all(action='DESELECT')
+
         original_object.select_set(True)
         context.view_layer.objects.active = original_object
         return {'FINISHED'}
@@ -38,7 +37,8 @@ class OBJECT_OT_ez_bake_contrib_cleanup(bpy.types.Operator):
 
     def execute(self, context):
         original_object = context.object
-        merged_object = context.selected_objects[1]
+
+        merged_object = context.scene.objects["EZBake_contributing_temp"]
 
         # Delete merged object
         bpy.ops.object.select_all(action='DESELECT')
@@ -67,6 +67,23 @@ def add_bake(macro, context, map_name, map_type, non_color=False):
 
     macro.steps += 1
 
+    if context.object.ez_bake_use_contributing_objects:
+        setup_step = macro.define("OBJECT_OT_ez_bake_setup")
+        setup_step.properties.map_name = map_name
+        setup_step.properties.map_type = map_type
+        setup_step.properties.non_color = non_color
+        setup_step.properties.contrib_pass = True
+
+        bake_step = macro.define("OBJECT_OT_bake")
+        bake_step.properties.type = map_type
+        bake_step.properties.save_mode = "INTERNAL"
+
+        save_step = macro.define("OBJECT_OT_ez_bake_post")
+        save_step.properties.map_name = map_name
+        save_step.properties.contrib_pass = True
+
+        macro.steps += 1
+
 
 class EzBakeProgress(bpy.types.PropertyGroup):
     progress: bpy.props.IntProperty(default=0)
@@ -76,7 +93,10 @@ class EzBakeProgress(bpy.types.PropertyGroup):
         self.progress += 1
 
     def get_progress_fac(self):
-        return self.progress / self.total
+        if self.total == 0:
+            return 0.0
+        else:
+            return self.progress / self.total
 
     def get_progress_string(self):
         return f'{self.progress} / {self.total}'
@@ -114,20 +134,37 @@ class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
     map_name: bpy.props.StringProperty()
     map_type: bpy.props.StringProperty()
     non_color: bpy.props.BoolProperty()
+    contrib_pass: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
-        if self.map_name == "Color":
-            setup_color(context)
-        if self.map_name == "Metallic":
-            setup_metallic(context)
-        if self.map_name == "Alpha":
-            setup_alpha(context)
-
         obj = context.object
 
-        image_name = f'{obj.name}_{self.map_name}'
+        # Disconnect any BSDF Properties that need to be disconnected 
+        for material_slot in obj.material_slots:
+            if self.map_name == "Color":
+                disconnect_bsdf_property(material_slot.material, 'Metallic', 0.0)
+                disconnect_bsdf_property(material_slot.material, 'Alpha', 1.0)
+            elif self.map_name == "Metallic":
+                disconnect_bsdf_property(material_slot.material, 'Metallic', 0.0, view=True)
+            elif self.map_name == "Alpha":
+                disconnect_bsdf_property(material_slot.material, 'Alpha', 0.0, view=True)
 
-        # Get texture image, create if non existent
+        if self.contrib_pass:
+            context.scene.objects["EZBake_contributing_temp"].select_set(True)
+            context.view_layer.objects.active = obj
+            context.scene.render.bake.use_selected_to_active = True
+            context.scene.render.bake.use_clear = False
+            context.scene.render.bake.margin = 0
+        else:
+            context.scene.render.bake.use_selected_to_active = False
+            context.scene.render.bake.use_clear = True
+
+        
+        image_name = f'{obj.name}_{self.map_name}'
+        if self.contrib_pass:
+            image_name += "_contrib"
+
+        # Get texture image
         image = bpy.data.images.get(image_name)
 
         # If resolution has changed
@@ -137,25 +174,22 @@ class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
             bpy.data.images.remove(image)
 
         if image is None:
-            bpy.ops.image.new(name=image_name, width=int(obj.ez_bake_resolution),
-                              height=int(obj.ez_bake_resolution), alpha=False)
+            if self.contrib_pass:
+                # Contributing pass needs alpha
+                bpy.ops.image.new(name=image_name, width=int(obj.ez_bake_resolution),
+                                  height=int(obj.ez_bake_resolution), alpha=True, color=(0,0,0,0))
+            else:
+                bpy.ops.image.new(name=image_name, width=int(obj.ez_bake_resolution),
+                                  height=int(obj.ez_bake_resolution), alpha=False)
+
             image = bpy.data.images[image_name]
 
         if self.non_color:
             image.colorspace_settings.name = 'Non-Color'
 
-        # Add image node to each material and select it
+        # Setup image nodes
         for material_slot in obj.material_slots:
-            mat = material_slot.material
-            node_name = f'EZBake_{self.map_name}'
-            node = mat.node_tree.nodes.get(node_name)
-
-            if node is None:
-                node = mat.node_tree.nodes.new("ShaderNodeTexImage")
-                node.name = node_name
-                node.image = image
-                node.update()
-            mat.node_tree.nodes.active = node
+            setup_image_node(material_slot.material, self.map_name, image)
 
         return {"FINISHED"}
 
@@ -166,183 +200,191 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
     bl_label = "Cleanup after baking"
 
     map_name: bpy.props.StringProperty()
+    contrib_pass: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
-        if self.map_name == "Color":
-            unsetup_color(context)
-        if self.map_name == "Metallic":
-            unsetup_metallic(context)
-        if self.map_name == "Alpha":
-            unsetup_alpha(context)
-
         obj = context.object
-        image_name = f'{obj.name}_{self.map_name}'
-        image = bpy.data.images.get(image_name)
-        table = {
-            'JPG': ['jpg', 'JPEG'],
-            'PNG': ['png', 'PNG'],
-        }
 
-        prefs = context.preferences.addons[__package__].preferences
-        prefs_directory = prefs.texture_directory
-        file_ext = table[obj.ez_bake_file_format][0]
-        format = table[obj.ez_bake_file_format][1]
+        # Reconnect BSDF properties
+        for material_slot in obj.material_slots:
+            if self.map_name == "Color":
+                reconnect_bsdf_property(material_slot.material, 'Metallic')
+                reconnect_bsdf_property(material_slot.material, 'Alpha')
+            elif self.map_name == "Metallic":
+                reconnect_bsdf_property(material_slot.material, 'Metallic')
+            elif self.map_name == "Alpha":
+                reconnect_bsdf_property(material_slot.material, 'Alpha')
 
-        image.filepath_raw = f'//{prefs_directory}/{image_name}.{file_ext}'
-        image.file_format = format
+        if self.contrib_pass:
+            # base image should already exist
+            base_image = bpy.data.images[f'{obj.name}_{self.map_name}']
+            overlay_image = bpy.data.images[f'{obj.name}_{self.map_name}_contrib']
+            overlay_images(base_image, overlay_image)
+            bpy.data.images.remove(overlay_image)
+            base_image.save()
+            # Show base image in any open editor
+            for area in context.screen.areas:
+                if area.type == 'IMAGE_EDITOR':
+                    area.spaces.active.image = base_image
 
-        image.save()
+            print(f"EZBAKE: Finished baking {base_image.name} Overlay")
+        else:
+            image_name = f'{obj.name}_{self.map_name}'
+            image = bpy.data.images.get(image_name)
+            table = {
+                'JPG': ['jpg', 'JPEG'],
+                'PNG': ['png', 'PNG'],
+            }
+
+            prefs = context.preferences.addons[__package__].preferences
+            prefs_directory = prefs.texture_directory
+            file_ext = table[obj.ez_bake_file_format][0]
+            format = table[obj.ez_bake_file_format][1]
+
+            image.filepath_raw = f'//{prefs_directory}/{image_name}.{file_ext}'
+            image.file_format = format
+
+            image.save()
+            print(f"EZBAKE: Finished baking {image_name}.{file_ext}")
 
         # clean up nodes
         for material_slot in obj.material_slots:
-            mat = material_slot.material
+            cleanup_image_node(material_slot.material, self.map_name)
 
-            node_name = f'EZBake_{self.map_name}'
-            node = mat.node_tree.nodes.get(node_name)
-            if node is not None:
-                mat.node_tree.nodes.remove(node)
+
 
         context.scene.ez_bake_progress.increment()
-        print(f"EZBAKE: Finished baking {obj.name}_{self.map_name}.{file_ext}")
 
         return {"FINISHED"}
 
 
-def setup_color(context):
-    for material_slot in context.object.material_slots:
-        mat = material_slot.material
-        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                    "ShaderNodeBsdfPrincipled")
-        metallic_link = [x for x in mat.node_tree.links if x.to_node ==
-                         bsdf and x.to_socket.identifier == 'Metallic']
-        if len(metallic_link) == 0:
-            # copy bare metallic value to new node
-            node = mat.node_tree.nodes.new("ShaderNodeValue")
-            node.location = bsdf.location - mathutils.Vector((170, 45))
-            node.name = "EZBake_MetallicTemp"
-            node.outputs[0].default_value = bsdf.inputs['Metallic'].default_value
-            bsdf.inputs['Metallic'].default_value = 0.0
-        else:
-            # make temp reroute node
-            metallic_link = metallic_link[0]
-            node = mat.node_tree.nodes.new("NodeReroute")
-            node.location = bsdf.location - mathutils.Vector((30, 80))
-            node.name = "EZBake_MetallicTemp"
-            mat.node_tree.links.new(metallic_link.from_socket, node.inputs[0])
-            mat.node_tree.links.remove(metallic_link)
-            bsdf.inputs['Metallic'].default_value = 0.0
+def temp_node_name(property):
+    return f'EZBake_{property}_temp'
+
+# Disconnect the bsdf property (eg. Metallic) and set to a certain value while keeping original value aside
+# If view is True, that property is connected to the viewer node
+def disconnect_bsdf_property(material, property, new_value, view=False):
+    node_tree = material.node_tree
+    nodes = node_tree.nodes
+    links = node_tree.links
+
+    bsdf = next((n for n in nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"), None)
+    if bsdf is None:
+        raise Exception(f"No BSDF Found in material {material.name}")
+    link = next((l for l in links if l.to_node == bsdf and l.to_socket.identifier == property), None)
+
+    if link is None:
+        # Socket has no input, is just a value
+        # Make new node to keep value
+        temp_node = nodes.new("ShaderNodeValue")
+        temp_node.location = bsdf.location - mathutils.Vector((170, 100))
+        temp_node.name = temp_node_name(property)
+        temp_node.outputs[0].default_value = bsdf.inputs[property].default_value
+    else:
+        # Socket is connected to something
+        # Make a temporary reroute node
+        temp_node = nodes.new("NodeReroute")
+        temp_node.location = bsdf.location - mathutils.Vector((30, 100))
+        temp_node.name = temp_node_name(property)
+        links.new(link.from_socket, temp_node.inputs[0])
+        links.remove(link)
+
+    # Set new value
+    bsdf.inputs[property].default_value = new_value
+
+    if view:
+        output_node = next((n for n in nodes if n.bl_idname == "ShaderNodeOutputMaterial"), None)
+        if output_node is None:
+            raise Exception(f"No Output node in material {material.name}")
+
+        links.new(temp_node.outputs[0], output_node.inputs[0])
+
+def reconnect_bsdf_property(material, property):
+    node_tree = material.node_tree
+    nodes = node_tree.nodes
+    links = node_tree.links
+
+    temp_node = next((n for n in nodes if n.name == temp_node_name(property)), None)
+    if temp_node is None:
+        raise Exception(f"Temp node not found in material {material.name}")
+
+    bsdf = next((n for n in nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"), None)
+    if bsdf is None:
+        raise Exception(f"No BSDF Found in material {material.name}")
+
+    if temp_node.bl_idname == 'ShaderNodeValue':
+        # Copy value back
+        bsdf.inputs[property].default_value = temp_node.outputs[0].default_value
+    elif temp_node.bl_idname == 'NodeReroute':
+        # Plug reroute node's input back in
+        link = next(x for x in links if x.to_socket == temp_node.inputs[0])
+        links.new(link.from_socket, bsdf.inputs[property])
+        links.remove(link)
+
+    nodes.remove(temp_node)
+
+    # Reconnect BSDF to output incase the property was viewed
+    output_node = next((n for n in nodes if n.bl_idname == "ShaderNodeOutputMaterial"), None)
+    if output_node is None:
+        raise Exception(f"No Output node in material {material.name}")
+
+    links.new(bsdf.outputs[0], output_node.inputs[0])
 
 
-def unsetup_color(context):
-    for material_slot in context.object.material_slots:
-        mat = material_slot.material
-        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                    "ShaderNodeBsdfPrincipled")
-        metallic_temp = next(
-            x for x in mat.node_tree.nodes if x.name == 'EZBake_MetallicTemp')
-        if metallic_temp.bl_idname == 'ShaderNodeValue':
-            # copy value back to bsdf
-            bsdf.inputs['Metallic'].default_value = metallic_temp.outputs[0].default_value
-            mat.node_tree.nodes.remove(metallic_temp)
-        elif metallic_temp.bl_idname == 'NodeReroute':
-            # plug reroute back in
-            metallic_link = next(
-                x for x in mat.node_tree.links if x.to_socket == metallic_temp.inputs[0])
-            mat.node_tree.links.new(
-                metallic_link.from_socket, bsdf.inputs['Metallic'])
-            mat.node_tree.links.remove(metallic_link)
-            mat.node_tree.nodes.remove(metallic_temp)
-        else:
-            print("fuck")
+
+def image_node_name(map_name):
+    return f'EZBake_{map_name}_image'
+
+# Add and select image node to bake to
+def setup_image_node(material, map_name, image):
+    nodes = material.node_tree.nodes
+    node_name = image_node_name(map_name)
+    node = nodes.get(node_name)
+
+    if node is None:
+        node = nodes.new("ShaderNodeTexImage")
+        node.name = node_name
+        node.image = image
+        node.update()
+    nodes.active = node
+
+def cleanup_image_node(material, map_name):
+    nodes = material.node_tree.nodes
+    node_name = image_node_name(map_name)
+    node = nodes.get(node_name)
+
+    if node is not None:
+        nodes.remove(node)
 
 
-def setup_metallic(context):
-    for material_slot in context.object.material_slots:
-        mat = material_slot.material
-        output = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                      "ShaderNodeOutputMaterial")
-        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                    "ShaderNodeBsdfPrincipled")
-        metallic_link = [x for x in mat.node_tree.links if x.to_node ==
-                         bsdf and x.to_socket.identifier == 'Metallic']
-        if len(metallic_link) == 0:
-            # copy bare metallic value to new node
-            node = mat.node_tree.nodes.new("ShaderNodeValue")
-            node.location = bsdf.location - mathutils.Vector((170, 45))
-            node.name = "EZBake_MetallicTemp"
-            node.outputs[0].default_value = bsdf.inputs['Metallic'].default_value
-            mat.node_tree.links.new(node.outputs[0], output.inputs[0])
-        else:
-            # make temp reroute node
-            metallic_link = metallic_link[0]
-            mat.node_tree.links.new(
-                metallic_link.from_socket, output.inputs[0])
+# Overlay decal over base object texture
+def overlay_images(image_A, image_B):
+    width, height = image_A.size
 
+    pixels_A = list(image_A.pixels[:])
+    pixels_B = list(image_B.pixels[:])
+    result_pixels = [0.0] * len(pixels_A)
 
-def unsetup_metallic(context):
-    for material_slot in context.object.material_slots:
-        mat = material_slot.material
-        output = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                      "ShaderNodeOutputMaterial")
-        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                    "ShaderNodeBsdfPrincipled")
-        metallic_temp = [
-            x for x in mat.node_tree.nodes if x.name == 'EZBake_MetallicTemp']
-        if len(metallic_temp) == 1:
-            metallic_temp = metallic_temp[0]
-            # copy value back to bsdf
-            mat.node_tree.nodes.remove(metallic_temp)
-            mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
-        else:
-            # plug reroute back in
-            metallic_link = next(
-                x for x in mat.node_tree.links if x.to_socket == output.inputs[0])
-            mat.node_tree.links.remove(metallic_link)
-            mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
+    for y in range(height):
+        for x in range(width):
+            # Calculate the pixel index (4 values per pixel: R, G, B, A)
+            idx = (y * width + x) * 4
 
+            # Get pixel data from Image A and Image B
+            r_A, g_A, b_A, alpha_A = pixels_A[idx:idx+4]
+            r_B, g_B, b_B, alpha_B = pixels_B[idx:idx+4]
+            
+            def lerp(a, b, t):
+                return a + t * (b - a)
+            
+            r_out = lerp(r_A, r_B, alpha_B)
+            g_out = lerp(g_A, g_B, alpha_B)
+            b_out = lerp(b_A, b_B, alpha_B)
 
-def setup_alpha(context):
-    for material_slot in context.object.material_slots:
-        mat = material_slot.material
-        output = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                      "ShaderNodeOutputMaterial")
-        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                    "ShaderNodeBsdfPrincipled")
-        alpha_link = [x for x in mat.node_tree.links if x.to_node ==
-                      bsdf and x.to_socket.identifier == 'Alpha']
-        if len(alpha_link) == 0:
-            # copy bare alpha value to new node
-            node = mat.node_tree.nodes.new("ShaderNodeValue")
-            node.location = bsdf.location - mathutils.Vector((170, 45))
-            node.name = "EZBake_AlphaTemp"
-            node.outputs[0].default_value = bsdf.inputs['Alpha'].default_value
-            mat.node_tree.links.new(node.outputs[0], output.inputs[0])
-        else:
-            # make temp reroute node
-            alpha_link = alpha_link[0]
-            mat.node_tree.links.new(alpha_link.from_socket, output.inputs[0])
+            result_pixels[idx:idx+4] = [r_out, g_out, b_out, 1.0]
 
-
-def unsetup_alpha(context):
-    for material_slot in context.object.material_slots:
-        mat = material_slot.material
-        output = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                      "ShaderNodeOutputMaterial")
-        bsdf = next(x for x in mat.node_tree.nodes if x.bl_idname ==
-                    "ShaderNodeBsdfPrincipled")
-        alpha_temp = [
-            x for x in mat.node_tree.nodes if x.name == 'EZBake_AlphaTemp']
-        if len(alpha_temp) == 1:
-            alpha_temp = alpha_temp[0]
-            # copy value back to bsdf
-            mat.node_tree.nodes.remove(alpha_temp)
-            mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
-        else:
-            # plug reroute back in
-            alpha_link = next(
-                x for x in mat.node_tree.links if x.to_socket == output.inputs[0])
-            mat.node_tree.links.remove(alpha_link)
-            mat.node_tree.links.new(bsdf.outputs[0], output.inputs[0])
+    image_A.pixels = result_pixels
+    # result_image.save()
 
 
 def register():

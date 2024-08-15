@@ -149,10 +149,13 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
         context.scene.render.bake.use_pass_direct = False
         context.scene.render.bake.use_pass_indirect = False
         context.scene.cycles.use_denoising = True
-        context.scene.render.bake.use_clear = True
-        context.scene.render.bake.use_selected_to_active = False
+
+        context.scene.ez_bake_progress.reset()
 
         macro = utils.get_macro()
+
+        if obj.ez_bake_use_contributing_objects:
+            macro.define("OBJECT_OT_ez_bake_contrib_setup")
 
         if obj.ez_bake_color:
             utils.add_bake(macro, context, "Color", "DIFFUSE")
@@ -168,26 +171,8 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
         if obj.ez_bake_alpha:
             utils.add_bake(macro, context, "Alpha", "EMIT", non_color=True)
 
+
         if obj.ez_bake_use_contributing_objects:
-            # Contributing objects setup
-            macro.define("OBJECT_OT_ez_bake_contrib_setup")
-
-            if obj.ez_bake_color:
-                utils.add_bake(macro, context, "Color", "DIFFUSE")
-            if obj.ez_bake_roughness:
-                utils.add_bake(macro, context, "Roughness",
-                               "ROUGHNESS", non_color=True)
-            if obj.ez_bake_metallic:
-                utils.add_bake(macro, context, "Metallic",
-                               "EMIT", non_color=True)
-            if obj.ez_bake_normal:
-                utils.add_bake(macro, context, "Normal",
-                               "NORMAL", non_color=True)
-            if obj.ez_bake_emission:
-                utils.add_bake(macro, context, "Emission", "EMIT")
-            if obj.ez_bake_alpha:
-                utils.add_bake(macro, context, "Alpha", "EMIT", non_color=True)
-
             macro.define("OBJECT_OT_ez_bake_contrib_cleanup")
 
         context.scene.ez_bake_progress.total = macro.steps
