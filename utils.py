@@ -126,6 +126,44 @@ def get_macro():
     bpy.utils.register_class(OBJECT_OT_ez_bake_macro)
     return OBJECT_OT_ez_bake_macro
 
+def prepare_material(material, map_name):
+    if map_name == "Color":
+        disconnect_bsdf_property(material, 'Metallic', 0.0)
+        disconnect_bsdf_property(material, 'Alpha', 1.0)
+    elif map_name == "Metallic":
+        disconnect_bsdf_property(material, 'Metallic', 0.0, view=True)
+    elif map_name == "Alpha":
+        disconnect_bsdf_property(material, 'Alpha', 0.0, view=True)
+
+def restore_material(material, map_name):
+    if map_name == "Color":
+        reconnect_bsdf_property(material, 'Metallic')
+        reconnect_bsdf_property(material, 'Alpha')
+    elif map_name == "Metallic":
+        reconnect_bsdf_property(material, 'Metallic')
+    elif map_name == "Alpha":
+        reconnect_bsdf_property(material, 'Alpha')
+
+def get_materials(obj):
+    materials = []
+
+    for material_slot in obj.material_slots:
+        mat = material_slot.material
+        if mat is None:
+            continue
+        if mat not in materials:
+            materials.append(mat)
+
+    for obj in obj.ez_bake_contributing_objects:
+        for material_slot in obj.object.material_slots:
+            mat = material_slot.material
+            if mat is None:
+                continue
+            if mat not in materials:
+                materials.append(mat)
+
+    return materials
+            
 
 class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
     bl_idname = "object.ez_bake_setup"
@@ -138,16 +176,10 @@ class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.object
-
         # Disconnect any BSDF Properties that need to be disconnected 
-        for material_slot in obj.material_slots:
-            if self.map_name == "Color":
-                disconnect_bsdf_property(material_slot.material, 'Metallic', 0.0)
-                disconnect_bsdf_property(material_slot.material, 'Alpha', 1.0)
-            elif self.map_name == "Metallic":
-                disconnect_bsdf_property(material_slot.material, 'Metallic', 0.0, view=True)
-            elif self.map_name == "Alpha":
-                disconnect_bsdf_property(material_slot.material, 'Alpha', 0.0, view=True)
+        for material in get_materials(obj):
+            prepare_material(material, self.map_name)
+
 
         if self.contrib_pass:
             context.scene.objects["EZBake_contributing_temp"].select_set(True)
@@ -188,8 +220,8 @@ class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
             image.colorspace_settings.name = 'Non-Color'
 
         # Setup image nodes
-        for material_slot in obj.material_slots:
-            setup_image_node(material_slot.material, self.map_name, image)
+        for material in get_materials(obj):
+            setup_image_node(material, self.map_name, image)
 
         return {"FINISHED"}
 
@@ -204,16 +236,9 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.object
-
         # Reconnect BSDF properties
-        for material_slot in obj.material_slots:
-            if self.map_name == "Color":
-                reconnect_bsdf_property(material_slot.material, 'Metallic')
-                reconnect_bsdf_property(material_slot.material, 'Alpha')
-            elif self.map_name == "Metallic":
-                reconnect_bsdf_property(material_slot.material, 'Metallic')
-            elif self.map_name == "Alpha":
-                reconnect_bsdf_property(material_slot.material, 'Alpha')
+        for material in get_materials(obj):
+            restore_material(material, self.map_name)
 
         if self.contrib_pass:
             # base image should already exist
@@ -248,8 +273,8 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
             print(f"EZBAKE: Finished baking {image_name}.{file_ext}")
 
         # clean up nodes
-        for material_slot in obj.material_slots:
-            cleanup_image_node(material_slot.material, self.map_name)
+        for material in get_materials(obj):
+            cleanup_image_node(material, self.map_name)
 
 
 
