@@ -56,6 +56,9 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
             panel.prop(obj, "ez_bake_emission")
             panel.prop(obj, "ez_bake_alpha")
 
+        # AUTO REFRESH
+        layout.prop(context.scene, "ez_bake_pack_orm")
+
         # SAMPLES
         row = layout.row()
         row.label(text="Samples")
@@ -110,6 +113,7 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
 
             if context.scene.ez_bake_auto_refresh:
                 refresh_textures(context)
+                setup_materials(context)
 
             self.cancel(context)
             return {"FINISHED"}
@@ -185,6 +189,71 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
 
         return {"RUNNING_MODAL"}
 
+def setup_materials(context):
+    if bpy.data.materials.get(context.object.name) is not None:
+        return
+    material = bpy.data.materials.new(name=context.object.name)
+    material.use_nodes = True
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    nodes.clear()
+
+    # Add a Principled BSDF shader node
+    principled_bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
+    principled_bsdf.location = (0, 0)
+
+    # Add an output node
+    material_output = nodes.new(type="ShaderNodeOutputMaterial")
+    material_output.location = (400, 0)
+
+    # Link Principled BSDF to Material Output
+    links.new(principled_bsdf.outputs["BSDF"], material_output.inputs["Surface"])
+
+    # Function to add an image texture node and link it to a given principled input
+    def add_image_texture(texture_image, principled_input, location):
+        if texture_image:
+            texture_node = nodes.new(type="ShaderNodeTexImage")
+            texture_node.image = texture_image
+            texture_node.location = location
+            links.new(texture_node.outputs["Color"], principled_bsdf.inputs[principled_input])
+
+    # Add the textures to the material
+    add_image_texture(bpy.data.images.get(f'{context.object.name}_Color'), "Base Color", (-300, 200))
+
+    if bpy.data.images.get(f'{context.object.name}_ORM'):
+        orm_node = nodes.new(type="ShaderNodeTexImage")
+        orm_node.image = bpy.data.images.get(f'{context.object.name}_ORM')
+        orm_node.location = (-500, 0)
+
+        # Create a Separate RGB node to split ORM channels
+        separate_rgb = nodes.new(type="ShaderNodeSeparateRGB")
+        separate_rgb.location = (-300, 0)
+        links.new(orm_node.outputs["Color"], separate_rgb.inputs["Image"])
+
+        # Link ORM channels to the Principled BSDF shader inputs
+        # links.new(separate_rgb.outputs["R"], principled_bsdf.inputs["Ambient Occlusion"])
+        links.new(separate_rgb.outputs["G"], principled_bsdf.inputs["Roughness"])
+        links.new(separate_rgb.outputs["B"], principled_bsdf.inputs["Metallic"])
+
+    else:
+        add_image_texture(bpy.data.images.get(f'{context.object.name}_Roughness'), "Roughness", (-300, 0))
+        add_image_texture(bpy.data.images.get(f'{context.object.name}_Metallic'), "Metallic", (-300, -200))
+
+    # Add a normal map texture if provided
+    if bpy.data.images.get(f'{context.object.name}_Normal'):
+        normal_map_node = nodes.new(type="ShaderNodeNormalMap")
+        normal_map_node.location = (-100, -400)
+
+        normal_texture_node = nodes.new(type="ShaderNodeTexImage")
+        normal_texture_node.image = bpy.data.images.get(f'{context.object.name}_Normal')
+        normal_texture_node.location = (-300, -400)
+        
+        links.new(normal_texture_node.outputs["Color"], normal_map_node.inputs["Color"])
+        links.new(normal_map_node.outputs["Normal"], principled_bsdf.inputs["Normal"])
+
+    return material
 
 def refresh_textures(context):
     for img in bpy.data.images:
@@ -255,6 +324,10 @@ def register():
         name="Auto refresh textures",
         description="Automatically refresh all images using the baked texture",
         default=True)
+    bpy.types.Scene.ez_bake_pack_orm = bpy.props.BoolProperty(
+        name="Pack ORM Map",
+        description="Automatically pack AO, Roughness and Metallic into a single image",
+        default=False)
 
 
 def unregister():

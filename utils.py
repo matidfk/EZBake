@@ -277,6 +277,25 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
             cleanup_image_node(material, self.map_name)
 
 
+        # only works because we always do metallic after roughness and AO
+        if self.map_name == "Metallic" and context.scene.ez_bake_pack_orm:
+            image_name = f'{obj.name}_ORM'
+            image = combine_orm(bpy.data.images.get(f'{obj.name}_AO'), bpy.data.images.get(f'{obj.name}_Roughness'), bpy.data.images.get(f'{obj.name}_Metallic'), image_name)
+            table = {
+                'JPG': ['jpg', 'JPEG'],
+                'PNG': ['png', 'PNG'],
+            }
+
+            prefs = context.preferences.addons[__package__].preferences
+            prefs_directory = prefs.texture_directory
+            file_ext = table[obj.ez_bake_file_format][0]
+            format = table[obj.ez_bake_file_format][1]
+
+            image.filepath_raw = f'//{prefs_directory}/{image_name}.{file_ext}'
+            image.file_format = format
+
+            image.save()
+            print(f"EZBAKE: Finished combining {image_name}.{file_ext}")
 
         context.scene.ez_bake_progress.increment()
 
@@ -411,6 +430,58 @@ def overlay_images(image_A, image_B):
     image_A.pixels = result_pixels
     # result_image.save()
 
+def combine_orm(ao_image, roughness_image, metallic_image, orm_name):
+    #image_name = f'{obj.name}_{self.map_name}'
+    resolution = 0
+    if ao_image is not None:
+        resolution = ao_image.size[0]
+    elif roughness_image is not None:
+        resolution = roughness_image.size[0]
+    elif metallic_image is not None:
+        resolution = metallic_image.size[0]
+
+
+    if ao_image is None:
+        print("makign ao image")
+        ao_image = bpy.data.images.new("EZBake_orm_ao_temp", width=resolution, height=resolution)
+        ao_image.pixels = [1.0, 1.0, 1.0, 1.0] * (resolution * resolution)
+    if roughness_image is None:
+        roughness_image = bpy.data.images.new("EZBake_orm_roughness_temp", width=resolution, height=resolution)
+        roughness_image.pixels = [0.5, 0.5, 0.5, 1.0] * (resolution * resolution)
+    if metallic_image is None:
+        metallic_image = bpy.data.images.new("EZBake_orm_metallic_temp", width=resolution, height=resolution)
+        metallic_image.pixels = [0.0, 0.0, 0.0, 1.0] * (resolution * resolution)
+
+    # if res changes
+    orm_image = bpy.data.images.get(orm_name)
+    if orm_image is not None and \
+            (orm_image.size[0] != resolution
+             or orm_image.size[1] != resolution):
+        bpy.data.images.remove(orm_image)
+
+    if orm_image is None:
+        orm_image = bpy.data.images.new(orm_name, width=resolution, height=resolution)
+        orm_image.colorspace_settings.name = 'Non-Color'
+
+    ao_pixels = list(ao_image.pixels)
+    roughness_pixels = list(roughness_image.pixels)
+    metallic_pixels = list(metallic_image.pixels)
+
+    orm_pixels = [0] * len(ao_pixels)
+
+    for i in range(0, len(ao_pixels), 4):
+        # R channel for AO, G channel for Roughness, B channel for Metallic
+        orm_pixels[i] = ao_pixels[i]            # Red channel (AO)
+        orm_pixels[i+1] = roughness_pixels[i+1] # Green channel (Roughness)
+        orm_pixels[i+2] = metallic_pixels[i+2]  # Blue channel (Metallic)
+        orm_pixels[i+3] = 1.0                   # Alpha channel (optional, set to 1.0 for opaque)
+
+    orm_image.pixels = orm_pixels
+
+
+    image_name = orm_name
+
+    return orm_image
 
 def register():
     bpy.utils.register_class(OBJECT_OT_ez_bake_setup)
