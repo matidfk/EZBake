@@ -19,36 +19,41 @@ def get_macro(context):
     bpy.utils.register_class(OBJECT_OT_ez_bake_macro)
     macro = OBJECT_OT_ez_bake_macro
 
-    obj_props = context.object.ez_bake_object_props
-    if obj_props.bake_color:
-        add_bake(macro, context, "Color", "DIFFUSE")
-    if obj_props.bake_roughness:
-        add_bake(macro, context, "Roughness", "ROUGHNESS", non_color=True)
-    if obj_props.bake_metallic:
-        add_bake(macro, context, "Metallic", "EMIT", non_color=True)
-    if obj_props.bake_normal:
-        add_bake(macro, context, "Normal", "NORMAL", non_color=True, is_overlay=False)
-    if obj_props.bake_emission:
-        add_bake(macro, context, "Emission", "EMIT")
-    if obj_props.bake_alpha:
-        add_bake(macro, context, "Alpha", "EMIT", non_color=True)
+    for obj in context.selected_objects:
+        macro.define("OBJECT_OT_ez_bake_select").properties.object_name = obj.name
 
-    if obj_props.use_overlays:
-        for layer_index, layer in enumerate(obj_props.overlay_layers):
-            # Alpha is needed
-            add_bake(macro, context, "Alpha", "EMIT", non_color=True, is_overlay=True, layer_index=layer_index)
+        obj_props = obj.ez_bake_object_props
+        if obj_props.bake_color:
+            add_bake(macro, context, "Color", "DIFFUSE")
+        if obj_props.bake_roughness:
+            add_bake(macro, context, "Roughness", "ROUGHNESS", non_color=True)
+        if obj_props.bake_metallic:
+            add_bake(macro, context, "Metallic", "EMIT", non_color=True)
+        if obj_props.bake_normal:
+            add_bake(macro, context, "Normal", "NORMAL", non_color=True)
+        if obj_props.bake_emission:
+            add_bake(macro, context, "Emission", "EMIT")
+        if obj_props.bake_alpha:
+            add_bake(macro, context, "Alpha", "EMIT", non_color=True)
 
-            if obj_props.bake_color:
-                add_bake(macro, context, "Color", "DIFFUSE", is_overlay=True, layer_index=layer_index)
-            if obj_props.bake_roughness:
-                add_bake(macro, context, "Roughness", "ROUGHNESS", non_color=True, is_overlay=True, layer_index=layer_index)
-            if obj_props.bake_metallic:
-                add_bake(macro, context, "Metallic", "EMIT", non_color=True, is_overlay=True, layer_index=layer_index)
-            if obj_props.bake_normal:
-                add_bake(macro, context, "Normal", "NORMAL", non_color=True, is_overlay=True, layer_index=layer_index)
-            if obj_props.bake_emission:
-                add_bake(macro, context, "Emission", "EMIT", is_overlay=True, layer_index=layer_index)
+        if obj_props.use_overlays:
+            for layer_index, layer in enumerate(obj_props.overlay_layers):
+                # Alpha is needed
+                add_bake(macro, context, "Alpha", "EMIT", non_color=True, is_overlay=True, layer_index=layer_index)
 
+                if obj_props.bake_color:
+                    add_bake(macro, context, "Color", "DIFFUSE", is_overlay=True, layer_index=layer_index)
+                if obj_props.bake_roughness:
+                    add_bake(macro, context, "Roughness", "ROUGHNESS", non_color=True, is_overlay=True, layer_index=layer_index)
+                if obj_props.bake_metallic:
+                    add_bake(macro, context, "Metallic", "EMIT", non_color=True, is_overlay=True, layer_index=layer_index)
+                if obj_props.bake_normal:
+                    add_bake(macro, context, "Normal", "NORMAL", non_color=True, is_overlay=True, layer_index=layer_index)
+                if obj_props.bake_emission:
+                    add_bake(macro, context, "Emission", "EMIT", is_overlay=True, layer_index=layer_index)
+
+    
+    macro.define("OBJECT_OT_ez_bake_restore_selection").properties.object_names = "###".join([obj.name for obj in context.selected_objects])
     
     return OBJECT_OT_ez_bake_macro
 
@@ -82,6 +87,36 @@ def add_bake(macro, context, map_name, map_type, non_color=False, is_overlay=Fal
 
     macro.steps += 1
 
+class OBJECT_OT_ez_bake_select(bpy.types.Operator):
+    bl_idname = "object.ez_bake_select"
+    bl_options = {"INTERNAL"}
+    bl_label = "Select object"
+
+    object_name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        obj = bpy.data.objects.get(self.object_name)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        return {'FINISHED'}
+
+class OBJECT_OT_ez_bake_restore_selection(bpy.types.Operator):
+    bl_idname = "object.ez_bake_restore_selection"
+    bl_options = {"INTERNAL"}
+    bl_label = "Restore original selection"
+
+    object_names: bpy.props.StringProperty()
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        for object_name in self.object_names.split("###"):
+            obj = bpy.data.objects.get(object_name)
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+        return {'FINISHED'}
 
 class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
     bl_idname = "object.ez_bake_setup"
@@ -105,13 +140,16 @@ class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
 
         if self.is_overlay:
             bpy.ops.object.select_all(action='DESELECT')
-            context.scene.objects["EZBake_contributing_temp"].select_set(True)
+            context.scene.objects["EZBake_overlay_temp"].select_set(True)
             obj.select_set(True)
             context.view_layer.objects.active = obj
             context.scene.render.bake.use_selected_to_active = True
             context.scene.render.bake.use_clear = False
             context.scene.render.bake.margin = 0
-        # else:
+        else:
+            context.scene.render.bake.use_selected_to_active = False
+            context.scene.render.bake.use_clear = True
+            context.scene.render.bake.margin = 16
 
         return {"FINISHED"}
 
@@ -198,7 +236,7 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
         
         # ALPHA PACKING
         # only works because we always do alpha after color
-        elif self.map_name == "Alpha" and context.scene.ez_bake_scene_props.pack_alpha:
+        if self.map_name == "Alpha" and context.scene.ez_bake_scene_props.pack_alpha:
             utils.pack_alpha(bpy.data.images.get(
                 f'{obj.name}_Color'), bpy.data.images.get(f'{obj.name}_Alpha'))
             bpy.data.images.get(f'{obj.name}_Color').save()
@@ -212,8 +250,7 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
             self.save_image(context, image)
 
         # REGULAR
-        else:
-            self.save_image(context, bpy.data.images.get(image_name))
+        self.save_image(context, bpy.data.images.get(image_name))
 
         context.scene.ez_bake_progress.increment()
 
@@ -246,7 +283,11 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
 def register():
     bpy.utils.register_class(OBJECT_OT_ez_bake_setup)
     bpy.utils.register_class(OBJECT_OT_ez_bake_post)
+    bpy.utils.register_class(OBJECT_OT_ez_bake_select)
+    bpy.utils.register_class(OBJECT_OT_ez_bake_restore_selection)
 
 def unregister():
     bpy.utils.unregister_class(OBJECT_OT_ez_bake_setup)
     bpy.utils.unregister_class(OBJECT_OT_ez_bake_post)
+    bpy.utils.unregister_class(OBJECT_OT_ez_bake_select)
+    bpy.utils.unregister_class(OBJECT_OT_ez_bake_restore_selection)

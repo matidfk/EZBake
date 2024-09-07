@@ -18,7 +18,7 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
             context.scene.render.engine = self.original_render_engine
             context.scene.cycles.samples = self.original_cycles_samples
 
-            utils.setup_material(context)
+            utils.setup_materials(context)
 
             self.cancel(context)
             return {"FINISHED"}

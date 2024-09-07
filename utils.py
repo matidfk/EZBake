@@ -21,7 +21,7 @@ class OBJECT_OT_ez_bake_overlay_setup(bpy.types.Operator):
         bpy.ops.object.duplicate() # Duplicate to not alter original objects
         bpy.ops.object.convert(target='MESH') # Apply any modifiers
         bpy.ops.object.join()
-        context.object.name = "EZBake_contributing_temp"
+        context.object.name = "EZBake_overlay_temp"
 
         bpy.ops.object.select_all(action='DESELECT')
 
@@ -39,7 +39,7 @@ class OBJECT_OT_ez_bake_overlay_cleanup(bpy.types.Operator):
     def execute(self, context):
         original_object = context.object
 
-        merged_object = context.scene.objects["EZBake_contributing_temp"]
+        merged_object = context.scene.objects["EZBake_overlay_temp"]
 
         # Delete merged object
         bpy.ops.object.select_all(action='DESELECT')
@@ -90,7 +90,7 @@ def prepare_material(material, map_name):
 
     if map_name == "Color":
         disconnect_bsdf_property(material, 'Metallic', 0.0)
-        # disconnect_bsdf_property(material, 'Alpha', 1.0)
+        disconnect_bsdf_property(material, 'Alpha', 1.0)
     elif map_name == "Metallic":
         disconnect_bsdf_property(material, 'Metallic', 0.0, view=True)
     elif map_name == "Alpha":
@@ -103,7 +103,7 @@ def restore_material(material, map_name):
 
     if map_name == "Color":
         reconnect_bsdf_property(material, 'Metallic')
-        # reconnect_bsdf_property(material, 'Alpha')
+        reconnect_bsdf_property(material, 'Alpha')
     elif map_name == "Metallic":
         reconnect_bsdf_property(material, 'Metallic')
     elif map_name == "Alpha":
@@ -303,7 +303,6 @@ def pack_alpha(image_A, image_B):
             result_pixels[idx:idx+4] = [r_A, g_A, b_A, r_B]
 
     image_A.pixels = result_pixels
-    print("PACKED ALPHA")
     # result_image.save()
 
 
@@ -318,7 +317,6 @@ def combine_orm(ao_image, roughness_image, metallic_image, orm_name):
         resolution = metallic_image.size[0]
 
     if ao_image is None:
-        print("makign ao image")
         ao_image = bpy.data.images.new(
             "EZBake_orm_ao_temp", width=resolution, height=resolution)
         ao_image.pixels = [1.0, 1.0, 1.0, 1.0] * (resolution * resolution)
@@ -366,91 +364,91 @@ def combine_orm(ao_image, roughness_image, metallic_image, orm_name):
     return orm_image
 
 
-def setup_material(context):
+def setup_materials(context):
     # Check if material already exists
-    if bpy.data.materials.get(context.object.name) is not None:
-        return
+    for obj in context.selected_objects:
+        if bpy.data.materials.get(obj.name) is not None:
+            return
 
-    material = bpy.data.materials.new(name=context.object.name)
-    material.use_nodes = True
+        material = bpy.data.materials.new(name=obj.name)
+        material.use_nodes = True
 
-    nodes = material.node_tree.nodes
-    links = material.node_tree.links
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
 
-    nodes.clear()
+        nodes.clear()
 
-    # Add a Principled BSDF shader node
-    principled_bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
-    principled_bsdf.location = (0, 0)
+        # Add a Principled BSDF shader node
+        principled_bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
+        principled_bsdf.location = (0, 0)
 
-    # Add an output node
-    material_output = nodes.new(type="ShaderNodeOutputMaterial")
-    material_output.location = (400, 0)
+        # Add an output node
+        material_output = nodes.new(type="ShaderNodeOutputMaterial")
+        material_output.location = (400, 0)
 
-    # Link Principled BSDF to Material Output
-    links.new(principled_bsdf.outputs["BSDF"],
-              material_output.inputs["Surface"])
+        # Link Principled BSDF to Material Output
+        links.new(principled_bsdf.outputs["BSDF"],
+                  material_output.inputs["Surface"])
 
-    # Function to add an image texture node and link it to a given principled input
-    def add_image_texture(texture_image, principled_input, location):
-        if texture_image:
-            texture_node = nodes.new(type="ShaderNodeTexImage")
-            texture_node.image = texture_image
-            texture_node.location = location
-            links.new(texture_node.outputs["Color"],
-                      principled_bsdf.inputs[principled_input])
+        # Function to add an image texture node and link it to a given principled input
+        def add_image_texture(texture_image, principled_input, location):
+            if texture_image:
+                texture_node = nodes.new(type="ShaderNodeTexImage")
+                texture_node.image = texture_image
+                texture_node.location = location
+                links.new(texture_node.outputs["Color"],
+                          principled_bsdf.inputs[principled_input])
 
-    # --- COLOR ---
-    add_image_texture(bpy.data.images.get(
-        f'{context.object.name}_Color'), "Base Color", (-300, 200))
-    # --- ALPHA ---
-    add_image_texture(bpy.data.images.get(
-        f'{context.object.name}_Alpha'), "Alpha", (-300, -600))
-    # --- EMISSION ---
-    add_image_texture(bpy.data.images.get(
-        f'{context.object.name}_Emission'), "Emission Color", (-300, -800))
-    if bpy.data.images.get(f'{context.object.name}_Emission') is not None:
-        principled_bsdf.inputs["Emission Strength"].default_value = 1.0
-
-
-    # --- ORM ---
-    if bpy.data.images.get(f'{context.object.name}_ORM'):
-        orm_node = nodes.new(type="ShaderNodeTexImage")
-        orm_node.image = bpy.data.images.get(f'{context.object.name}_ORM')
-        orm_node.location = (-500, 0)
-
-        # Create a Separate RGB node to split ORM channels
-        separate_rgb = nodes.new(type="ShaderNodeSeparateRGB")
-        separate_rgb.location = (-300, 0)
-        links.new(orm_node.outputs["Color"], separate_rgb.inputs["Image"])
-
-        # Link ORM channels to the Principled BSDF shader inputs
-        # links.new(separate_rgb.outputs["R"], principled_bsdf.inputs["Ambient Occlusion"])
-        links.new(separate_rgb.outputs["G"], principled_bsdf.inputs["Roughness"])
-        links.new(separate_rgb.outputs["B"], principled_bsdf.inputs["Metallic"])
-
-    else:
-        # --- ROUGHNESS ---
+        # --- COLOR ---
         add_image_texture(bpy.data.images.get(
-            f'{context.object.name}_Roughness'), "Roughness", (-300, 0))
-        # --- METALLIC ---
+            f'{obj.name}_Color'), "Base Color", (-300, 200))
+        # --- ALPHA ---
         add_image_texture(bpy.data.images.get(
-            f'{context.object.name}_Metallic'), "Metallic", (-300, -200))
+            f'{obj.name}_Alpha'), "Alpha", (-300, -600))
+        # --- EMISSION ---
+        add_image_texture(bpy.data.images.get(
+            f'{obj.name}_Emission'), "Emission Color", (-300, -800))
+        if bpy.data.images.get(f'{obj.name}_Emission') is not None:
+            principled_bsdf.inputs["Emission Strength"].default_value = 1.0
 
-    # --- NORMAL ---
-    if bpy.data.images.get(f'{context.object.name}_Normal'):
-        normal_map_node = nodes.new(type="ShaderNodeNormalMap")
-        normal_map_node.location = (-200, -400)
 
-        normal_texture_node = nodes.new(type="ShaderNodeTexImage")
-        normal_texture_node.image = bpy.data.images.get(
-            f'{context.object.name}_Normal')
-        normal_texture_node.location = (-300, -400)
+        # --- ORM ---
+        if bpy.data.images.get(f'{obj.name}_ORM'):
+            orm_node = nodes.new(type="ShaderNodeTexImage")
+            orm_node.image = bpy.data.images.get(f'{obj.name}_ORM')
+            orm_node.location = (-500, 0)
 
-        links.new(normal_texture_node.outputs["Color"], normal_map_node.inputs["Color"])
-        links.new(normal_map_node.outputs["Normal"], principled_bsdf.inputs["Normal"])
+            # Create a Separate RGB node to split ORM channels
+            separate_rgb = nodes.new(type="ShaderNodeSeparateRGB")
+            separate_rgb.location = (-300, 0)
+            links.new(orm_node.outputs["Color"], separate_rgb.inputs["Image"])
 
-    return material
+            # Link ORM channels to the Principled BSDF shader inputs
+            # links.new(separate_rgb.outputs["R"], principled_bsdf.inputs["Ambient Occlusion"])
+            links.new(separate_rgb.outputs["G"], principled_bsdf.inputs["Roughness"])
+            links.new(separate_rgb.outputs["B"], principled_bsdf.inputs["Metallic"])
+
+        else:
+            # --- ROUGHNESS ---
+            add_image_texture(bpy.data.images.get(
+                f'{obj.name}_Roughness'), "Roughness", (-300, 0))
+            # --- METALLIC ---
+            add_image_texture(bpy.data.images.get(
+                f'{obj.name}_Metallic'), "Metallic", (-300, -200))
+
+        # --- NORMAL ---
+        if bpy.data.images.get(f'{obj.name}_Normal'):
+            normal_map_node = nodes.new(type="ShaderNodeNormalMap")
+            normal_map_node.location = (-200, -400)
+
+            normal_texture_node = nodes.new(type="ShaderNodeTexImage")
+            normal_texture_node.image = bpy.data.images.get(
+                f'{obj.name}_Normal')
+            normal_texture_node.location = (-300, -400)
+
+            links.new(normal_texture_node.outputs["Color"], normal_map_node.inputs["Color"])
+            links.new(normal_map_node.outputs["Normal"], principled_bsdf.inputs["Normal"])
+
 
 
 def register():
