@@ -156,6 +156,7 @@ def disconnect_bsdf_property(material, property, new_value, view=False):
         temp_node = nodes.new("ShaderNodeValue")
         temp_node.location = bsdf.location - mathutils.Vector((170, 100))
         temp_node.name = temp_node_name(property)
+        temp_node.label = temp_node_name(property)
         temp_node.outputs[0].default_value = bsdf.inputs[property].default_value
     else:
         # Socket is connected to something
@@ -163,6 +164,7 @@ def disconnect_bsdf_property(material, property, new_value, view=False):
         temp_node = nodes.new("NodeReroute")
         temp_node.location = bsdf.location - mathutils.Vector((30, 100))
         temp_node.name = temp_node_name(property)
+        temp_node.label = temp_node_name(property)
         links.new(link.from_socket, temp_node.inputs[0])
         links.remove(link)
 
@@ -403,8 +405,10 @@ def setup_materials(context):
         add_image_texture(bpy.data.images.get(
             f'{obj.name}_Color'), "Base Color", (-300, 200))
         # --- ALPHA ---
-        add_image_texture(bpy.data.images.get(
-            f'{obj.name}_Alpha'), "Alpha", (-300, -600))
+        # only add alpha if selected, otherwise it is a generated all white image needed only for overlays
+        if obj.ez_bake_object_props.bake_alpha:
+            add_image_texture(bpy.data.images.get(
+                f'{obj.name}_Alpha'), "Alpha", (-300, -600))
         # --- EMISSION ---
         add_image_texture(bpy.data.images.get(
             f'{obj.name}_Emission'), "Emission Color", (-300, -800))

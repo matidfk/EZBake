@@ -20,6 +20,16 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
 
             utils.setup_materials(context)
 
+            for obj in context.selected_objects:
+                # if an all white alpha was generated for the overlay pass, remove it
+                if obj.ez_bake_object_props.use_overlays and not obj.ez_bake_object_props.bake_alpha:
+                    alpha_overlay_image = bpy.data.images.get(f'{obj.name}_Alpha_overlay')
+                    if alpha_overlay_image is not None:
+                        bpy.data.images.remove(alpha_overlay_image)
+                    alpha_image = bpy.data.images.get(f'{obj.name}_Alpha')
+                    if alpha_image is not None:
+                        bpy.data.images.remove(alpha_image)
+
             self.cancel(context)
             return {"FINISHED"}
 
@@ -45,12 +55,6 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
         context.scene.ez_bake_progress.reset()
 
         _macro = macro.get_macro(context)
-
-        # if obj.ez_bake_use_contributing_objects:
-        #     macro.define("OBJECT_OT_ez_bake_contrib_setup")
-        #
-        # if obj.ez_bake_use_contributing_objects:
-        #     macro.define("OBJECT_OT_ez_bake_contrib_cleanup")
 
         context.scene.ez_bake_progress.total = _macro.steps
 

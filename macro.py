@@ -116,6 +116,7 @@ class OBJECT_OT_ez_bake_restore_selection(bpy.types.Operator):
             obj = bpy.data.objects.get(object_name)
             obj.select_set(True)
             context.view_layer.objects.active = obj
+
         return {'FINISHED'}
 
 class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
@@ -218,16 +219,25 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
         # OVERLAY IMAGES
         if self.is_overlay:
             # base image should already exist
-            base_image = bpy.data.images[f'{obj.name}_{self.map_name}']
-            overlay_image = bpy.data.images[f'{obj.name}_{self.map_name}_overlay']
-            mask_image = bpy.data.images[f'{obj.name}_Alpha_overlay']
+            base_image = bpy.data.images.get(f'{obj.name}_{self.map_name}')
+            overlay_image = bpy.data.images.get(f'{obj.name}_{self.map_name}_overlay')
+            mask_image = bpy.data.images.get(f'{obj.name}_Alpha_overlay')
 
+            generated_alpha = False
             if self.map_name == "Alpha":
+                # if base alpha doesnt exist assume all opaque
+                if base_image is None:
+                    bpy.ops.image.new(name=f'{obj.name}_Alpha', width=int(obj_props.resolution), height=int(obj_props.resolution), alpha=True, color=(1, 1, 1, 1))
+                    base_image = bpy.data.images[f'{obj.name}_Alpha']
+                    generated_alpha = True
                 utils.overlay_images(base_image, overlay_image, mask_image)
+                if obj_props.bake_alpha:
+                    base_image.save()
             else: 
                 utils.overlay_images(base_image, overlay_image, mask_image)
                 bpy.data.images.remove(overlay_image)
-            base_image.save()
+                base_image.save()
+
             # Show new image in any open editor
             for area in context.screen.areas:
                 if area.type == 'IMAGE_EDITOR':
