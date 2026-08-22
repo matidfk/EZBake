@@ -17,6 +17,7 @@ class OBJECT_OT_ez_bake_overlay_setup(bpy.types.Operator):
         for obj in context.object.ez_bake_object_props.overlay_layers[self.layer_index].objects:
             obj.object.select_set(True)
             context.view_layer.objects.active = obj.object
+            obj.object.hide_render = True
 
         bpy.ops.object.duplicate() # Duplicate to not alter original objects
         bpy.ops.object.convert(target='MESH') # Apply any modifiers
@@ -26,6 +27,7 @@ class OBJECT_OT_ez_bake_overlay_setup(bpy.types.Operator):
         bpy.ops.object.select_all(action='DESELECT')
 
         original_object.select_set(True)
+        original_object.hide_render = False
         context.view_layer.objects.active = original_object
         return {'FINISHED'}
 
@@ -50,6 +52,10 @@ class OBJECT_OT_ez_bake_overlay_cleanup(bpy.types.Operator):
         # Select original object
         original_object.select_set(True)
         context.view_layer.objects.active = original_object
+
+        for layer in context.object.ez_bake_object_props.overlay_layers:
+            for obj in layer.objects:
+                obj.object.hide_render = False
         return {'FINISHED'}
 
 
