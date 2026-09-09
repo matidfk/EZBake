@@ -520,12 +520,8 @@ def register():
     bpy.utils.register_class(OBJECT_OT_ez_bake_setup)
     bpy.utils.register_class(OBJECT_OT_ez_bake_cleanup)
     
-    bpy.utils.register_class(EzBakeOverlayLayer)
-    
     bpy.types.Scene.ez_bake_steps = bpy.props.StringProperty()
-    bpy.context.scene.ez_bake_steps = ""
     bpy.types.Scene.ez_bake_current_step = bpy.props.IntProperty()
-    bpy.context.scene.ez_bake_current_step = 0
 
 
 def unregister():

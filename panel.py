@@ -1,5 +1,36 @@
 import bpy
 
+def get_current_step():
+    return bpy.context.scene.ez_bake_steps.split(";")[bpy.context.scene.ez_bake_current_step]
+
+def get_progress_factor():
+    steps = len(bpy.context.scene.ez_bake_steps.split(";")) - 1.0
+    return bpy.context.scene.ez_bake_current_step / steps
+
+# Add a layer to the list
+class OBJECT_OT_ez_bake_add_overlay_layer(bpy.types.Operator):
+    bl_idname = "ez_bake.add_overlay_layer"
+    bl_label = "Add Overlay"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    def execute(self, context):
+        context.object.ez_bake_object_props.overlay_layers.add()
+        return {'FINISHED'}
+
+# Remove a layer from the list
+class OBJECT_OT_ez_bake_remove_overlay_layer(bpy.types.Operator):
+    bl_idname = "ez_bake.remove_overlay_layer"
+    bl_label = "Remove Layer"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        context.object.ez_bake_object_props.overlay_layers.remove(self.index)
+
+        return {'FINISHED'}
+
+
 class OBJECT_PT_ez_bake(bpy.types.Panel):
     bl_label = "EZ bake"
     bl_space_type = "VIEW_3D"
@@ -107,28 +138,8 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
             
             panel.operator("ez_bake.add_overlay_layer", icon="ADD")
 
-# Add a layer to the list
-class OBJECT_OT_ez_bake_add_overlay_layer(bpy.types.Operator):
-    bl_idname = "ez_bake.add_overlay_layer"
-    bl_label = "Add Overlay"
-    bl_options = {"INTERNAL", "UNDO"}
 
-    def execute(self, context):
-        context.object.ez_bake_object_props.overlay_layers.add()
-        return {'FINISHED'}
 
-# Remove a layer from the list
-class OBJECT_OT_ez_bake_remove_overlay_layer(bpy.types.Operator):
-    bl_idname = "ez_bake.remove_overlay_layer"
-    bl_label = "Remove Layer"
-    bl_options = {"INTERNAL", "UNDO"}
-
-    index: bpy.props.IntProperty()
-
-    def execute(self, context):
-        context.object.ez_bake_object_props.overlay_layers.remove(self.index)
-
-        return {'FINISHED'}
 
 
 def register():

@@ -1,5 +1,11 @@
 import bpy
 
+class EzBakeOverlayLayer(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(name="Enabled", default=True)
+    type: bpy.props.EnumProperty(items=[("Object", "Object", "Object", "OBJECT_DATA", 0), ("Collection", "Collection", "Collection", "OUTLINER_COLLECTION", 1)])
+    object: bpy.props.PointerProperty(type=bpy.types.Object)
+    collection: bpy.props.PointerProperty(type=bpy.types.Collection)
+
 class EzBakeObjectProps(bpy.types.PropertyGroup):
     resolution: bpy.props.EnumProperty(
         name="Resolution",
@@ -50,20 +56,16 @@ class EzBakeObjectProps(bpy.types.PropertyGroup):
         
     setup_update_baked_material: bpy.props.BoolProperty(name="Setup/Update Baked Material", default=True)
 
-class EzBakeOverlayLayer(bpy.types.PropertyGroup):
-    enabled: bpy.props.BoolProperty(name="Enabled", default=True)
-    type: bpy.props.EnumProperty(items=[("Object", "Object", "Object", "OBJECT_DATA", 0), ("Collection", "Collection", "Collection", "OUTLINER_COLLECTION", 1)])
-    object: bpy.props.PointerProperty(type=bpy.types.Object)
-    collection: bpy.props.PointerProperty(type=bpy.types.Collection)
 
 
 def register():
+    bpy.utils.register_class(EzBakeOverlayLayer)
+
     bpy.utils.register_class(EzBakeObjectProps)
     bpy.types.Object.ez_bake_object_props = bpy.props.PointerProperty(type=EzBakeObjectProps)
 
-    bpy.utils.register_class(EzBakeOverlayLayer)
 
 def unregister():
-    bpy.utils.unregister_class(EzBakeObjectProps)
-
     bpy.utils.unregister_class(EzBakeOverlayLayer)
+
+    bpy.utils.unregister_class(EzBakeObjectProps)
