@@ -501,13 +501,6 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
         
         return {'FINISHED'}
 
-def get_current_step():
-    return bpy.context.scene.ez_bake_steps.split(";")[bpy.context.scene.ez_bake_current_step]
-
-def get_progress_factor():
-    steps = len(bpy.context.scene.ez_bake_steps.split(";")) - 1.0
-    return bpy.context.scene.ez_bake_current_step / steps
-
 def register():
     panel.register()
     props.register()
