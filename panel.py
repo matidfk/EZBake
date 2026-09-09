@@ -1,45 +1,41 @@
 import bpy
 
-
 class OBJECT_PT_ez_bake(bpy.types.Panel):
-    bl_label = "EZ Bake"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "EZ Bake"
+    bl_label = "EZ bake"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "EZ bake"
     bl_context = "objectmode"
-
-    @classmethod
-    def poll(cls, context):
-        return (context.object is not None)
-
+    
     def draw(self, context):
         obj = context.object
-        # Prevent errors when active object doesn't exist
-        if obj is None:
+        if context.scene.ez_bake_steps == "" and (obj is None or not obj.select_get()):
+            self.layout.label(text="No object selected")
             return
-
+        
         obj_props = obj.ez_bake_object_props
-        scene_props = context.scene.ez_bake_scene_props
-
         layout = self.layout
-        layout.alignment = 'RIGHT'
-
+        
+        # PROGRESS BAR
+        if context.scene.ez_bake_steps != "":
+            layout.progress(type="BAR", factor=get_progress_factor(), text=get_current_step())
+            layout.enabled = False
+            
+        else:
+            row = layout.row()
+            row.emboss = "PIE_MENU"
+            label = row.label(icon="OBJECT_DATA", text=obj.name)
+            
+            
+        
         # OPERATOR BUTTON
         box = layout.row()
         box.scale_y = 2.0
         box.operator("object.ez_bake")
-
-        # PROGRESS BAR
-        progress = context.scene.ez_bake_progress
-        if not progress.is_finished():
-            layout.progress(type='BAR',
-                            factor=progress.get_progress_fac(),
-                            text=progress.get_progress_string())
-            layout.active = False
-
-        # MAPS
+        
+        # MAPS DROPDOWN
         header, panel = layout.panel("ez_bake_maps")
-        header.label(text="Maps")
+        header.label(text="Maps", icon="RENDERLAYERS")
         if panel:
             panel = panel.grid_flow(columns=2, row_major=True)
             panel.prop(obj_props, "bake_color")
@@ -48,72 +44,102 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
             panel.prop(obj_props, "bake_normal")
             panel.prop(obj_props, "bake_emission")
             panel.prop(obj_props, "bake_alpha")
-
-
-        # SAMPLES
-        row = layout.row()
-        row.label(text="Samples")
-        row.prop(obj_props, "samples", text="")
-        # RESOLUTION
-        row = layout.row()
-        row.label(text="Resolution")
-        row.prop(obj_props, "resolution", text="")
-        # FILE FORMAT
-        layout.prop(scene_props, "file_format", expand=True)
-        # UV MAP
-        row = layout.row()
-        row.label(text="UV Map")
-        row.prop_search(obj_props, "uv_map",
-                        obj.data, "uv_layers", icon='GROUP_UVS', text="")
-
-        # OVERLAY LAYERS
-        header, panel = layout.panel("ez_bake_overlay_layers",
-                                     default_closed=True)
-        header = header.row()
-        header.prop(obj_props, "use_overlays", text="")
-        header.label(text=f"Overlays ({len(obj_props.overlay_layers)})")
+        
+        # BAKE OPTIONS
+        header, panel = layout.panel("ez_bake_options")
+        header.label(text="Bake options", icon="SETTINGS")
         if panel:
+            # UV MAP
+            row = panel.row()
+            row.label(text="UV Map")
+            row.prop_search(obj_props, "uv_map", obj.data, "uv_layers", icon='GROUP_UVS', text="")
+            
+            row = panel.row()
+            row.label(text="Setup/Update baked material")
+            row.prop(obj_props, "setup_update_baked_material", text="")
+            
+            row = panel.row()
+            row.label(text="Extrusion")
+            row.prop(context.scene.render.bake, "cage_extrusion", text="")
+            
+        # FORMAT OPTIONS
+        header, panel = layout.panel("ez_bake_format_options")
+        header.label(text="Format options", icon="FILE_IMAGE")
+        if panel:
+            # SAMPLES
+            row = panel.row()
+            row.label(text="Samples")
+            row.prop(obj_props, "samples", text="")
+            # RESOLUTION
+            row = panel.row()
+            row.label(text="Resolution")
+            row.prop(obj_props, "resolution", text="")
+            # FILE FORMAT
+            row = panel.row()
+            row.prop(obj_props, "file_format", expand=True)
+            # SAVE PATH
+            row = panel.row()
+            row.label(text="Save path")
+            row.prop(obj_props, "save_path", text="")
+        
+        # OVERLAYS
+        header, panel = layout.panel("ez_bake_overlays")
+        header.label(text="Overlays", icon="OVERLAY")
+        header.prop(obj_props, "use_overlays", text="")
+        if panel:
+            if not obj_props.use_overlays:
+                panel.active = False
             if len(obj_props.overlay_layers) == 0:
-                panel.label(text="No layers added")
+                panel.label(text="No overlays added")
             else:
                 for layer_index, layer in enumerate(obj_props.overlay_layers):
-                    layer_row = panel.column(align=True)
+                    row = panel.row()
+#                    row.label(text=f"{layer_index}")
+                    row = row.row()
+                                
+                    row.prop(layer, "type", expand=True, icon_only=True)
+                    if layer.type == "Collection":
+                        row.prop(layer, "collection", text="")
+                    else:
+                        row.prop(layer, "object", text="")
+                    row.operator("ez_bake.remove_overlay_layer", icon="X", text="").index = layer_index
+                    
             
-                    layer_header, layer_panel = layer_row.panel(f"ez_bake_overlay_layer[{layer_index}]")
-                    split = layer_header.split(factor = 0.02)
-                    split.separator()
-                    layer_header = split.row(align=True)
-                    layer_header.prop(layer, "enabled", text="")
-                    layer_header.label(text=f"Layer {layer_index} ({len(layer.objects)})")
-                    layer_header.operator("ez_bake.remove_overlay_layer",
-                                 text="", icon='X').index = layer_index
-                    if layer_panel:
-                        if len(layer.objects) == 0:
-                            layer_panel.label(text="No objects added")
-                        else:
-                            for object_index, object in enumerate(layer.objects):
-                                split = layer_panel.split(factor=0.2, align=True)
-                                split.separator()
-                                object_row = split.row(align=True)
-                                object_row.prop(object, "object", text="", expand=True)
-                                op = object_row.operator("ez_bake.remove_overlay_object",
-                                             text="", icon='X')
-                                op.layer_index = layer_index
-                                op.object_index = object_index
+            panel.operator("ez_bake.add_overlay_layer", icon="ADD")
 
-                        panel.operator("ez_bake.add_overlay_object", icon='ADD').layer_index = layer_index
+# Add a layer to the list
+class OBJECT_OT_ez_bake_add_overlay_layer(bpy.types.Operator):
+    bl_idname = "ez_bake.add_overlay_layer"
+    bl_label = "Add Overlay"
+    bl_options = {"INTERNAL", "UNDO"}
 
+    def execute(self, context):
+        context.object.ez_bake_object_props.overlay_layers.add()
+        return {'FINISHED'}
 
-            panel.operator("ez_bake.add_overlay_layer", icon='ADD')
+# Remove a layer from the list
+class OBJECT_OT_ez_bake_remove_overlay_layer(bpy.types.Operator):
+    bl_idname = "ez_bake.remove_overlay_layer"
+    bl_label = "Remove Layer"
+    bl_options = {"INTERNAL", "UNDO"}
 
-        layout.separator(type='LINE')
-        layout.prop(scene_props, "pack_orm")
-        layout.prop(scene_props, "pack_alpha")
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        context.object.ez_bake_object_props.overlay_layers.remove(self.index)
+
+        return {'FINISHED'}
 
 
 def register():
     bpy.utils.register_class(OBJECT_PT_ez_bake)
 
+    bpy.utils.register_class(OBJECT_OT_ez_bake_add_overlay_layer)
+    bpy.utils.register_class(OBJECT_OT_ez_bake_remove_overlay_layer)
 
 def unregister():
     bpy.utils.unregister_class(OBJECT_PT_ez_bake)
+
+    bpy.utils.unregister_class(OBJECT_OT_ez_bake_add_overlay_layer)
+    bpy.utils.unregister_class(OBJECT_OT_ez_bake_remove_overlay_layer)
+

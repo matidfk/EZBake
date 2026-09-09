@@ -1,8 +1,4 @@
 import bpy
-from . import overlay_objects
-
-
-
 
 class EzBakeObjectProps(bpy.types.PropertyGroup):
     resolution: bpy.props.EnumProperty(
@@ -16,6 +12,15 @@ class EzBakeObjectProps(bpy.types.PropertyGroup):
         ],
         default='2048'
     )
+    
+    file_format: bpy.props.EnumProperty(
+        items=[
+            ('JPG', 'JPG', 'JPG File format'),
+            ('PNG', 'PNG', 'PNG File format')],
+        name="File format", description="File format to use for the baked texture",
+        default='JPG')
+    
+    save_path: bpy.props.StringProperty(name="Save Path", description="Folder to save baked images to. Use // for relative path, leave empty to disable", default="")
 
     samples: bpy.props.IntProperty(
         name="Samples",
@@ -37,43 +42,28 @@ class EzBakeObjectProps(bpy.types.PropertyGroup):
         name="Emission", description="Bake the emission map", default=False)
     bake_alpha: bpy.props.BoolProperty(
         name="Alpha", description="Bake the alpha map", default=False)
-
+        
     use_overlays: bpy.props.BoolProperty(
         name="Use overlays", default=False)
     overlay_layers: bpy.props.CollectionProperty(
-        type=overlay_objects.EzBakeOverlayLayer)
+        type=EzBakeOverlayLayer)
+        
+    setup_update_baked_material: bpy.props.BoolProperty(name="Setup/Update Baked Material", default=True)
 
-
-
-
-class EzBakeSceneProps(bpy.types.PropertyGroup):
-
-    file_format: bpy.props.EnumProperty(
-        items=[
-            ('JPG', 'JPG', 'JPG File format'),
-            ('PNG', 'PNG', 'PNG File format')],
-        name="File format", description="File format to use for the baked texture",
-        default='JPG')
-    pack_orm: bpy.props.BoolProperty(
-        name="Pack ORM Map",
-        description="Automatically pack AO, Roughness and Metallic into a single image",
-        default=False)
-    pack_alpha: bpy.props.BoolProperty(
-        name="Pack Alpha",
-        description="Automatically pack Alpha information into the color image",
-        default=False)
+class EzBakeOverlayLayer(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(name="Enabled", default=True)
+    type: bpy.props.EnumProperty(items=[("Object", "Object", "Object", "OBJECT_DATA", 0), ("Collection", "Collection", "Collection", "OUTLINER_COLLECTION", 1)])
+    object: bpy.props.PointerProperty(type=bpy.types.Object)
+    collection: bpy.props.PointerProperty(type=bpy.types.Collection)
 
 
 def register():
     bpy.utils.register_class(EzBakeObjectProps)
-    bpy.utils.register_class(EzBakeSceneProps)
+    bpy.types.Object.ez_bake_object_props = bpy.props.PointerProperty(type=EzBakeObjectProps)
 
-    bpy.types.Object.ez_bake_object_props = bpy.props.PointerProperty(
-        type=EzBakeObjectProps)
-    bpy.types.Scene.ez_bake_scene_props = bpy.props.PointerProperty(
-        type=EzBakeSceneProps)
-
+    bpy.utils.register_class(EzBakeOverlayLayer)
 
 def unregister():
     bpy.utils.unregister_class(EzBakeObjectProps)
-    bpy.utils.unregister_class(EzBakeSceneProps)
+
+    bpy.utils.unregister_class(EzBakeOverlayLayer)
