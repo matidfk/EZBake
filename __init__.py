@@ -1,5 +1,7 @@
 import bpy
 import mathutils
+import os
+from bpy.app.handlers import persistent
 
 from . import panel
 from . import props
@@ -31,6 +33,8 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
     bl_idname = "object.ez_bake"
     bl_label = "Bake"
     bl_options = {"REGISTER", "UNDO"}
+
+    _timer = None
     
     def execute(self, context):
         obj = context.object
@@ -74,8 +78,22 @@ class OBJECT_OT_ez_bake(bpy.types.Operator):
             
         
         macro.define("object.ez_bake_post")
+
         bpy.ops.object.ez_bake_macro("INVOKE_DEFAULT")
-        return {'FINISHED'}
+
+        self._timer = context.window_manager.event_timer_add(0.1, window=context.window)
+        context.window_manager.modal_handler_add(self)
+
+        return {'RUNNING_MODAL'}
+        
+    # needed to keep the macro running, otherwise it gets stuck until the user updates ui eg. via moving mouse
+    def modal(self, context, event):
+        if context.scene.ez_bake_steps == "":
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+            return {"FINISHED"}
+        
+        return {"PASS_THROUGH"}
 
 NON_COLOR_MAPS = ["normal", "roughness", "metallic", "alpha"]
 def setup_target_image(object, map, overlay_index):
@@ -142,6 +160,7 @@ def setup_target_node(material, map, overlay_index):
     nodes.active = target_node
     
     return target_node
+
 MAP_INPUT_DICT = {"color": "Base Color", "alpha": "Alpha", "roughness": "Roughness", "metallic": "Metallic", "emission": "Emission Color"}
 def preview_shader_node_input(material, map):
     if map == "normal":
@@ -195,6 +214,13 @@ def setup_overlay(object, overlay_index):
                 obj.select_set(True)
             object.select_set(True)
             bpy.context.view_layer.objects.active = object
+        case "Children":
+            bpy.ops.object.select_all(action="DESELECT")
+            for obj in object.children_recursive:
+                obj.select_set(True)
+            object.select_set(True)
+            bpy.context.view_layer.objects.active = object
+
 
 def overlay_image(base_image, overlay_image, mask_image, map):
     node_group = bpy.data.node_groups.new("EZ_Bake_overlay_comp", "CompositorNodeTree")
@@ -203,22 +229,15 @@ def overlay_image(base_image, overlay_image, mask_image, map):
     nodes = node_group.nodes
     links = node_group.links
 
-    node_group.interface.new_socket(
-        name="Image",
-        in_out='OUTPUT',
-        socket_type='NodeSocketColor',
-    )
+    node_group.interface.new_socket(name="Image", in_out='OUTPUT', socket_type='NodeSocketColor')
 
     base_image_node = nodes.new("CompositorNodeImage")
-    base_image_node.location = (-200, 150)
     base_image_node.image = base_image
 
     overlay_image_node = nodes.new("CompositorNodeImage")
-    overlay_image_node.location = (-200, 0)
     overlay_image_node.image = overlay_image
 
     mask_image_node = nodes.new("CompositorNodeImage")
-    mask_image_node.location = (-200, -150)
     mask_image_node.image = mask_image
     
     alpha_over = nodes.new("CompositorNodeAlphaOver")
@@ -226,12 +245,26 @@ def overlay_image(base_image, overlay_image, mask_image, map):
     links.new(overlay_image_node.outputs[0], alpha_over.inputs.get("Foreground"))
     links.new(mask_image_node.outputs[0], alpha_over.inputs.get("Factor"))
     
-    last_node = alpha_over
+    # import custom anti aliasing group
+    script_path = bpy.utils.script_path_user()
+    node_group_file = os.path.join(script_path, "addons", "EZBake", "node_groups.blend")
+    # Load the node group from the blend file
+    with bpy.data.libraries.load(node_group_file, link=False) as (data_from, data_to):
+        node_group_name = "Fake anti-aliasing"  # Adjust this to match the actual name of your node group within the blend file
+        data_to.node_groups = [node_group_name]
+
+    # blender's built in anti aliasing doesnt anti-alias perfectly straight edges which i wanted
+    # anti_aliasing = nodes.new("CompositorNodeAntiAliasing")
+    anti_aliasing = nodes.new("CompositorNodeGroup")
+    anti_aliasing.node_tree = bpy.data.node_groups["Fake anti-aliasing"]
+    links.new(alpha_over.outputs[0], anti_aliasing.inputs.get("Image"))
+    last_node = anti_aliasing
+
     
     if map not in NON_COLOR_MAPS:
         convert = nodes.new("CompositorNodeConvertColorSpace")
         convert.to_color_space = "sRGB"
-        links.new(alpha_over.outputs[0], convert.inputs.get("Image"))
+        links.new(anti_aliasing.outputs[0], convert.inputs.get("Image"))
         last_node = convert
     
     viewer = nodes.new("CompositorNodeViewer")
@@ -248,6 +281,7 @@ def overlay_image(base_image, overlay_image, mask_image, map):
     base_image.pixels = viewer.pixels
     
     bpy.data.node_groups.remove(node_group)
+    bpy.data.images.remove(overlay_image)
    
 class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
     bl_idname = "object.ez_bake_setup"
@@ -280,7 +314,10 @@ class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
                     for o in layer.collection.objects:
                         for mat in o.data.materials:
                             preview_shader_node_input(mat, self.map)
-                    
+                case "Children":
+                    for o in obj.children_recursive:
+                        for mat in o.data.materials:
+                            preview_shader_node_input(mat, self.map)
                     
         
         # setup overlay and related bake settings
@@ -364,25 +401,34 @@ class OBJECT_OT_ez_bake_cleanup(bpy.types.Operator):
                         for mat in o.data.materials:
                             reconnect_shader_node_to_output(mat)
                             cleanup_temp_nodes(mat)
-                        
+                case "Children":
+                    for o in obj.children_recursive:
+                        for mat in o.data.materials:
+                            reconnect_shader_node_to_output(mat)
+                            cleanup_temp_nodes(mat)
             
+            # this needs to be changed to allow overlays to increase base object's baked alpha. maybe add a mode toggle?
             if self.map != "alpha":
                 overlay_image(bpy.data.images.get(f"{obj.name}_{self.map}"), bpy.data.images.get(f"{obj.name}_{self.map}_overlay{self.overlay_index}"), bpy.data.images.get(f"{obj.name}_alpha_overlay{self.overlay_index}"), self.map)
         
         if not (self.overlay_index != -1 and self.map == "alpha"):
             image = bpy.data.images.get(f"{obj.name}_{self.map}")
-            image.pack()
             
-            FORMAT_DICT = {
-            #  option fileext blenderformat
-                "JPG": ["jpg", "JPEG"],
-                "PNG": ["png", "PNG"]
-            }
-            if obj_props.save_path != "":
+            if obj_props.save_path == "":
+                image.pack()
+            else:
+                FORMAT_DICT = {
+                #  option fileext blenderformat
+                    "JPG": ["jpg", "JPEG"],
+                    "PNG": ["png", "PNG"]
+                }
                 file_ext = FORMAT_DICT[obj_props.file_format][0]
                 image.file_format = FORMAT_DICT[obj_props.file_format][1]
                 image.filepath_raw = f"{obj_props.save_path}/{obj.name}_{self.map}.{file_ext}"
-                image.save()
+                if obj_props.file_format == "JPG":
+                    image.save(quality=obj_props.file_format_quality)
+                else:
+                    image.save()
             
         
         context.scene.ez_bake_current_step += 1
@@ -489,7 +535,7 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
     def execute(self, context):
         obj = context.object
         
-        context.scene.ez_bake_current_step = 0
+        context.scene.ez_bake_current_step = -1
         context.scene.ez_bake_steps = ""
         
         bpy.ops.object.select_all(action="DESELECT")
@@ -500,6 +546,13 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
             setup_update_baked_material(obj)
         
         return {'FINISHED'}
+
+
+@persistent
+def reset_progress(dummy):
+    scene = bpy.context.scene
+    scene.ez_bake_current_step = -1
+    scene.ez_bake_steps = ""
 
 def register():
     panel.register()
@@ -513,8 +566,10 @@ def register():
     bpy.utils.register_class(OBJECT_OT_ez_bake_setup)
     bpy.utils.register_class(OBJECT_OT_ez_bake_cleanup)
     
-    bpy.types.Scene.ez_bake_steps = bpy.props.StringProperty()
-    bpy.types.Scene.ez_bake_current_step = bpy.props.IntProperty()
+    bpy.types.Scene.ez_bake_steps = bpy.props.StringProperty(default="")
+    bpy.types.Scene.ez_bake_current_step = bpy.props.IntProperty(default=-1)
+
+    bpy.app.handlers.load_post.append(reset_progress)
 
 
 def unregister():
@@ -528,6 +583,9 @@ def unregister():
     
     bpy.utils.unregister_class(OBJECT_OT_ez_bake_setup)
     bpy.utils.unregister_class(OBJECT_OT_ez_bake_cleanup)
+
+    if reset_progress in bpy.app.handlers.load_post:
+      bpy.app.handlers.load_post.remove(reset_progress)
     
 
 if __name__ == "__main__":

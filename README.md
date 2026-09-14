@@ -5,10 +5,13 @@ Blender add-on to streamline and simplify the baking process
 ![showcase](./doc/showcase.gif)
 
 # TODO:
-- alpha probably doesnt work right now
+- add PNG compression amount option?
+- add support for other and custom maps
+- add stricter pre-checks and errors
+- write docs and make screenshots
 - support multiple objects at once?
 - ORM map and Alpha packing
-- write docs and make screenshots
+- other post process like sharpen perhaps
 
 # Features:
 - Baking color/roughness/metallic/normal/emission/alpha maps

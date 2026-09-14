@@ -2,7 +2,7 @@ import bpy
 
 class EzBakeOverlayLayer(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="Enabled", default=True)
-    type: bpy.props.EnumProperty(items=[("Object", "Object", "Object", "OBJECT_DATA", 0), ("Collection", "Collection", "Collection", "OUTLINER_COLLECTION", 1)])
+    type: bpy.props.EnumProperty(items=[("Object", "Object", "Object", "OBJECT_DATA", 0), ("Collection", "Collection", "Collection", "OUTLINER_COLLECTION", 1), ("Children", "Children", "Children", "OUTLINER", 2)])
     object: bpy.props.PointerProperty(type=bpy.types.Object)
     collection: bpy.props.PointerProperty(type=bpy.types.Collection)
 
@@ -25,6 +25,8 @@ class EzBakeObjectProps(bpy.types.PropertyGroup):
             ('PNG', 'PNG', 'PNG File format')],
         name="File format", description="File format to use for the baked texture",
         default='JPG')
+
+    file_format_quality: bpy.props.IntProperty(name="Quality", min=10, max=100, default=98, subtype="PERCENTAGE")
     
     save_path: bpy.props.StringProperty(name="Save Path", description="Folder to save baked images to. Use // for relative path, leave empty to disable", default="")
 

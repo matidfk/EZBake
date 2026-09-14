@@ -40,7 +40,7 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
     
     def draw(self, context):
         obj = context.object
-        if context.scene.ez_bake_steps == "" and (obj is None or not obj.select_get()):
+        if context.scene.ez_bake_current_step == -1 and ((obj is None) or (not obj.select_get()) or (obj.type != "MESH")):
             self.layout.label(text="No object selected")
             return
         
@@ -48,7 +48,7 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
         layout = self.layout
         
         # PROGRESS BAR
-        if context.scene.ez_bake_steps != "":
+        if context.scene.ez_bake_current_step != -1:
             layout.progress(type="BAR", factor=get_progress_factor(), text=get_current_step())
             layout.enabled = False
             
@@ -108,6 +108,11 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
             # FILE FORMAT
             row = panel.row()
             row.prop(obj_props, "file_format", expand=True)
+
+            if obj_props.file_format == "JPG":
+                row = panel.row()
+                row.label(text="Quality")
+                row.prop(obj_props, "file_format_quality", text="")
             # SAVE PATH
             row = panel.row()
             row.label(text="Save path")
@@ -129,10 +134,13 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
                     row = row.row()
                                 
                     row.prop(layer, "type", expand=True, icon_only=True)
-                    if layer.type == "Collection":
-                        row.prop(layer, "collection", text="")
-                    else:
-                        row.prop(layer, "object", text="")
+                    match layer.type:
+                        case "Collection":
+                            row.prop(layer, "collection", text="")
+                        case "Object":
+                            row.prop(layer, "object", text="")
+                        case "Children":
+                            row.label(text=f"{len(obj.children_recursive)} Children")
                     row.operator("ez_bake.remove_overlay_layer", icon="X", text="").index = layer_index
                     
             
