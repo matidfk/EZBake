@@ -222,15 +222,19 @@ def setup_overlay(object, overlay_index):
             bpy.context.view_layer.objects.active = object
 
 
-def overlay_image(base_image, overlay_image, mask_image, map):
+def overlay_image(base_image, overlay_image, mask_image, map, obj_props):
     node_group = bpy.data.node_groups.new("EZ_Bake_overlay_comp", "CompositorNodeTree")
+    bpy.context.scene.render.compositor_device = "GPU"
     bpy.context.scene.compositing_node_group = node_group
 
     nodes = node_group.nodes
     links = node_group.links
 
+    to_remove = [node_group]
+
     node_group.interface.new_socket(name="Image", in_out='OUTPUT', socket_type='NodeSocketColor')
 
+    # IMAGE NODES
     base_image_node = nodes.new("CompositorNodeImage")
     base_image_node.image = base_image
 
@@ -240,31 +244,45 @@ def overlay_image(base_image, overlay_image, mask_image, map):
     mask_image_node = nodes.new("CompositorNodeImage")
     mask_image_node.image = mask_image
     
+    # OVERLAY
     alpha_over = nodes.new("CompositorNodeAlphaOver")
     links.new(base_image_node.outputs[0], alpha_over.inputs.get("Background"))
     links.new(overlay_image_node.outputs[0], alpha_over.inputs.get("Foreground"))
     links.new(mask_image_node.outputs[0], alpha_over.inputs.get("Factor"))
+    last_node = alpha_over
     
-    # import custom anti aliasing group
-    script_path = bpy.utils.script_path_user()
-    node_group_file = os.path.join(script_path, "addons", "EZBake", "node_groups.blend")
-    # Load the node group from the blend file
-    with bpy.data.libraries.load(node_group_file, link=False) as (data_from, data_to):
-        node_group_name = "Fake anti-aliasing"  # Adjust this to match the actual name of your node group within the blend file
-        data_to.node_groups = [node_group_name]
 
-    # blender's built in anti aliasing doesnt anti-alias perfectly straight edges which i wanted
-    # anti_aliasing = nodes.new("CompositorNodeAntiAliasing")
-    anti_aliasing = nodes.new("CompositorNodeGroup")
-    anti_aliasing.node_tree = bpy.data.node_groups["Fake anti-aliasing"]
-    links.new(alpha_over.outputs[0], anti_aliasing.inputs.get("Image"))
-    last_node = anti_aliasing
+    # ANTI-ALIASING
+    if obj_props and obj_props.anti_aliasing > 0.0:
+        # import from node_groups file
+        script_path = bpy.utils.script_path_user()
+        node_group_file = os.path.join(script_path, "addons", "EZBake", "node_groups.blend")
+        with bpy.data.libraries.load(node_group_file, link=False) as (data_from, data_to):
+            data_to.node_groups = ["Fake anti-aliasing"]
+
+        # blender's built in anti aliasing doesnt anti-alias perfectly straight edges which i wanted
+        # anti_aliasing = nodes.new("CompositorNodeAntiAliasing")
+        anti_aliasing = nodes.new("CompositorNodeGroup")
+        anti_aliasing.node_tree = bpy.data.node_groups["Fake anti-aliasing"]
+        anti_aliasing.inputs.get("Factor").default_value = obj_props.anti_aliasing
+        links.new(last_node.outputs[0], anti_aliasing.inputs.get("Image"))
+        to_remove.append(anti_aliasing.node_tree)
+        last_node = anti_aliasing
+
+    # SHARPENING
+    if obj_props and obj_props.sharpening > 0.0:
+        sharpening = nodes.new("CompositorNodeFilter")
+        sharpening.inputs.get("Type").default_value = "Diamond Sharpen"
+        sharpening.inputs.get("Factor").default_value = obj_props.sharpening
+        links.new(last_node.outputs[0], sharpening.inputs.get("Image"))
+        last_node = sharpening
 
     
+    # CONVERT RESULT TO VIEW SPACE (VIEWER NODE QUIRK)
     if map not in NON_COLOR_MAPS:
         convert = nodes.new("CompositorNodeConvertColorSpace")
         convert.to_color_space = "sRGB"
-        links.new(anti_aliasing.outputs[0], convert.inputs.get("Image"))
+        links.new(last_node.outputs[0], convert.inputs.get("Image"))
         last_node = convert
     
     viewer = nodes.new("CompositorNodeViewer")
@@ -280,7 +298,8 @@ def overlay_image(base_image, overlay_image, mask_image, map):
     viewer = bpy.data.images.get("Viewer Node")
     base_image.pixels = viewer.pixels
     
-    bpy.data.node_groups.remove(node_group)
+    for ng in to_remove:
+        bpy.data.node_groups.remove(ng)
     bpy.data.images.remove(overlay_image)
    
 class OBJECT_OT_ez_bake_setup(bpy.types.Operator):
@@ -409,7 +428,7 @@ class OBJECT_OT_ez_bake_cleanup(bpy.types.Operator):
             
             # this needs to be changed to allow overlays to increase base object's baked alpha. maybe add a mode toggle?
             if self.map != "alpha":
-                overlay_image(bpy.data.images.get(f"{obj.name}_{self.map}"), bpy.data.images.get(f"{obj.name}_{self.map}_overlay{self.overlay_index}"), bpy.data.images.get(f"{obj.name}_alpha_overlay{self.overlay_index}"), self.map)
+                overlay_image(bpy.data.images.get(f"{obj.name}_{self.map}"), bpy.data.images.get(f"{obj.name}_{self.map}_overlay{self.overlay_index}"), bpy.data.images.get(f"{obj.name}_alpha_overlay{self.overlay_index}"), self.map, obj_props)
         
         if not (self.overlay_index != -1 and self.map == "alpha"):
             image = bpy.data.images.get(f"{obj.name}_{self.map}")
@@ -542,6 +561,12 @@ class OBJECT_OT_ez_bake_post(bpy.types.Operator):
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
+        # remove overlay mask img clutter
+        for i in range(len(obj.ez_bake_object_props.overlay_layers)):
+            mask_image = bpy.data.images.get(f"{obj.name}_alpha_overlay{i}")
+            if mask_image:
+                bpy.data.images.remove(mask_image)
+
         if obj.ez_bake_object_props.setup_update_baked_material:
             setup_update_baked_material(obj)
         

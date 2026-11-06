@@ -80,7 +80,6 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
         header, panel = layout.panel("ez_bake_options")
         header.label(text="Bake options", icon="SETTINGS")
         if panel:
-            # UV MAP
             row = panel.row()
             row.label(text="UV Map")
             row.prop_search(obj_props, "uv_map", obj.data, "uv_layers", icon='GROUP_UVS', text="")
@@ -90,8 +89,12 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
             row.prop(obj_props, "setup_update_baked_material", text="")
             
             row = panel.row()
-            row.label(text="Extrusion")
-            row.prop(context.scene.render.bake, "cage_extrusion", text="")
+            row.label(text="Anti-aliasing")
+            row.prop(obj_props, "anti_aliasing", text="")
+
+            row = panel.row()
+            row.label(text="Sharpening")
+            row.prop(obj_props, "sharpening", text="")
             
         # FORMAT OPTIONS
         header, panel = layout.panel("ez_bake_format_options")
@@ -123,6 +126,10 @@ class OBJECT_PT_ez_bake(bpy.types.Panel):
         header.label(text="Overlays", icon="OVERLAY")
         header.prop(obj_props, "use_overlays", text="")
         if panel:
+            row = panel.row()
+            row.label(text="Extrusion")
+            row.prop(context.scene.render.bake, "cage_extrusion", text="")
+
             if not obj_props.use_overlays:
                 panel.active = False
             if len(obj_props.overlay_layers) == 0:

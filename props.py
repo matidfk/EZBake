@@ -26,14 +26,17 @@ class EzBakeObjectProps(bpy.types.PropertyGroup):
         name="File format", description="File format to use for the baked texture",
         default='JPG')
 
-    file_format_quality: bpy.props.IntProperty(name="Quality", min=10, max=100, default=98, subtype="PERCENTAGE")
+    file_format_quality: bpy.props.IntProperty(name="JPG Quality", min=10, max=100, default=98, subtype="PERCENTAGE")
     
-    save_path: bpy.props.StringProperty(name="Save Path", description="Folder to save baked images to. Use // for relative path, leave empty to disable", default="")
+    save_path: bpy.props.StringProperty(name="Save Path", description="Folder to save baked images to. Use // for relative path, leave empty to disable (image will be packed into .blend file)", default="")
 
     samples: bpy.props.IntProperty(
         name="Samples",
         description="""Number of samples to use for baking. Lower=Faster, Higher=Less noise""",
         default=8, min=1)
+
+    anti_aliasing: bpy.props.FloatProperty(name="Anti-aliasing strength", default=0.8, min=0.0, max=1.0, subtype="FACTOR")
+    sharpening: bpy.props.FloatProperty(name="Sharpening strength", default=0.0, min=0.0, max=1.0, subtype="FACTOR")
 
     uv_map: bpy.props.StringProperty(
         name="UV Map", description="UV map to use for baking", default="UVMap")
